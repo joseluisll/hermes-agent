@@ -156,8 +156,13 @@ def _run_on_mcp_loop(coro_or_factory, timeout: float = 30):
         if asyncio.iscoroutine(coro_or_factory):
             coro_or_factory.close()
         raise RuntimeError("MCP event loop is not running")
-    # run_coroutine_threadsafe copies the LOOP thread's context, so a per-request profile scope
-    # would vanish here; re-establish it inside the task's own context.
+    # run_coroutine_threadsafe COPIES the CALLER's context (call_soon_threadsafe captures
+    # contextvars.copy_context() on the calling thread), so a profile scope bound on the caller
+    # thread does NOT vanish here. The wrappers still re-establish the scopes for callers that run
+    # OUTSIDE any bound scope (the MCP loop's own internal schedules, pool threads), so every task
+    # runs under one consistent scope. Visible side effect of the copy: a lazily connected baseline
+    # spawns in its first caller's resolved cwd — handled by the _spawn_cwd comparison in
+    # tools.mcp_tool_project_scope.
     coro = _wrap_with_dashboard_oauth_flow(_wrap_with_home_override(
         coro_or_factory() if callable(coro_or_factory) else coro_or_factory))
     future = safe_schedule_threadsafe(coro, loop, logger=logger, log_message="MCP scheduling failed")
